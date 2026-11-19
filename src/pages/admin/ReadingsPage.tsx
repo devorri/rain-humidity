@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Download, RefreshCw } from 'lucide-react'
 import { supabase, READINGS_TABLE, friendlyError } from '../../lib/supabase'
 import ReadingsList from '../../components/ReadingsList'
-import { formatDateTime, normalizeReading, rainStatus, type Reading } from '../../lib/types'
+import { formatDateTime, getThermalAlert, normalizeReading, rainStatus, type Reading } from '../../lib/types'
 
 const PAGE_SIZE = 20
 
@@ -89,17 +89,20 @@ export default function ReadingsPage() {
       all.push(...list)
       if (list.length < chunk || all.length >= 50000) break
     }
-    const header = 'ID,Date & Time,Rain (%),Rain Status,Temperature (C),Humidity (%)'
-    const lines = all.map((r) =>
-      [
+    const header = 'ID,Date & Time,Rain (%),Rain Status,Temperature (C),Humidity (%),Heat Index (C),Thermal Alert'
+    const lines = all.map((r) => {
+      const th = getThermalAlert(r.temperature, r.humidity)
+      return [
         r.id,
         `"${formatDateTime(r.created_at)}"`,
         r.rain_percent,
-        rainStatus(r.rain_percent).label,
+        `"${rainStatus(r.rain_percent).label}"`,
         r.temperature.toFixed(2),
         r.humidity.toFixed(2),
-      ].join(','),
-    )
+        th.value.toFixed(1),
+        `"${th.label}"`,
+      ].join(',')
+    })
     const blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv;charset=utf-8' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
@@ -117,13 +120,18 @@ export default function ReadingsPage() {
       <div className="page-header">
         <div>
           <h1>Sensor Readings</h1>
-          <p className="lede">Full history of every reading sent by the device.</p>
+          <p className="lede">Full history of every reading sent by the device including calculated Heat Index.</p>
         </div>
         <div className="header-actions">
           <button type="button" className="btn-ghost btn-sm" onClick={() => void load()}>
             <RefreshCw size={15} /> Refresh
           </button>
-          <button type="button" className="btn btn-sm" onClick={() => void exportCsv()} disabled={exporting || total === 0}>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => void exportCsv()}
+            disabled={exporting || total === 0}
+          >
             <Download size={15} /> {exporting ? 'Exporting…' : 'Export CSV'}
           </button>
         </div>

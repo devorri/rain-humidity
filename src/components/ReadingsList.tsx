@@ -1,4 +1,4 @@
-import { formatDateTime, rainStatus, type Reading } from '../lib/types'
+import { formatDateTime, getThermalAlert, rainStatus, type Reading } from '../lib/types'
 
 type Props = {
   rows: Reading[]
@@ -20,18 +20,20 @@ export default function ReadingsList({ rows, emptyText, showId }: Props) {
               <th>Status</th>
               <th>Temperature</th>
               <th>Humidity</th>
+              <th>Heat Index / Alert</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={showId ? 6 : 5} className="empty">
+                <td colSpan={showId ? 7 : 6} className="empty">
                   {emptyText}
                 </td>
               </tr>
             ) : (
               rows.map((r) => {
                 const s = rainStatus(r.rain_percent)
+                const th = getThermalAlert(r.temperature, r.humidity)
                 return (
                   <tr key={r.id}>
                     {showId && <td className="muted">{r.id}</td>}
@@ -44,6 +46,12 @@ export default function ReadingsList({ rows, emptyText, showId }: Props) {
                     </td>
                     <td>{r.temperature.toFixed(1)}°C</td>
                     <td>{r.humidity.toFixed(1)}%</td>
+                    <td>
+                      <strong>{th.value.toFixed(1)}°C</strong>{' '}
+                      <span className={`badge ${th.tone}`} style={{ marginLeft: '0.35rem' }}>
+                        {th.label}
+                      </span>
+                    </td>
                   </tr>
                 )
               })
@@ -58,6 +66,7 @@ export default function ReadingsList({ rows, emptyText, showId }: Props) {
         ) : (
           rows.map((r) => {
             const s = rainStatus(r.rain_percent)
+            const th = getThermalAlert(r.temperature, r.humidity)
             return (
               <div className="reading-card" key={r.id}>
                 <div className="reading-card-top">
@@ -65,7 +74,10 @@ export default function ReadingsList({ rows, emptyText, showId }: Props) {
                     {showId && <span className="muted">#{r.id} · </span>}
                     {formatDateTime(r.created_at)}
                   </span>
-                  <span className={`badge ${s.tone}`}>{s.label}</span>
+                  <div style={{ display: 'flex', gap: '0.35rem' }}>
+                    <span className={`badge ${s.tone}`}>{s.label}</span>
+                    <span className={`badge ${th.tone}`}>{th.label}</span>
+                  </div>
                 </div>
                 <div className="reading-card-values">
                   <div>
@@ -79,6 +91,10 @@ export default function ReadingsList({ rows, emptyText, showId }: Props) {
                   <div>
                     <span className="label">Humidity</span>
                     <strong>{r.humidity.toFixed(1)}%</strong>
+                  </div>
+                  <div>
+                    <span className="label">Heat Index</span>
+                    <strong>{th.value.toFixed(1)}°C</strong>
                   </div>
                 </div>
               </div>

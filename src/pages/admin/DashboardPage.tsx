@@ -1,8 +1,40 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CloudRain, Droplets, Thermometer, Clock, RefreshCw } from 'lucide-react'
+import {
+  CloudRain,
+  Droplets,
+  Thermometer,
+  Clock,
+  RefreshCw,
+  Flame,
+  Snowflake,
+  Volume2,
+  VolumeX,
+  Bell,
+  BellOff,
+  HelpCircle,
+  AlertTriangle,
+} from 'lucide-react'
 import { supabase, READINGS_TABLE, friendlyError } from '../../lib/supabase'
-import { formatTime, normalizeReading, ONLINE_WINDOW_MS, rainStatus, timeAgo, type Reading } from '../../lib/types'
+import {
+  formatTime,
+  getThermalAlert,
+  HEAT_INDEX_THRESHOLDS,
+  normalizeReading,
+  ONLINE_WINDOW_MS,
+  rainStatus,
+  timeAgo,
+  WIND_CHILL_THRESHOLDS,
+  type Reading,
+} from '../../lib/types'
+import {
+  isNotificationSupported,
+  isSoundEnabled,
+  playAlertSound,
+  requestNotificationPermission,
+  setSoundEnabled,
+  triggerDesktopNotification,
+} from '../../lib/alerts'
 import ReadingsList from '../../components/ReadingsList'
 import TrendChart from '../../components/TrendChart'
 
@@ -43,6 +75,15 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [nowMs, setNowMs] = useState(() => Date.now())
 
+  // Alert settings & state
+  const [soundOn, setSoundOn] = useState<boolean>(() => isSoundEnabled())
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() =>
+    isNotificationSupported() ? Notification.permission : 'denied',
+  )
+  const [showGuide, setShowGuide] = useState(false)
+  const [guideTab, setGuideTab] = useState<'heat' | 'wind'>('heat')
+  const lastAlertReadingId = useRef<number | null>(null)
+
   const load = useCallback(async () => {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
     const [recentRes, dayRes] = await Promise.all([
@@ -58,7 +99,23 @@ export default function DashboardPage() {
       setError(friendlyError(recentRes.error))
     } else {
       setError(null)
-      setRecent((recentRes.data as Reading[]).map(normalizeReading))
+      const data = (recentRes.data as Reading[]).map(normalizeReading)
+      setRecent(data)
+
+      // Trigger notification if the newest reading is an alert and hasn't been notified yet
+      if (data.length > 0) {
+        const top = data[0]
+        const thermal = getThermalAlert(top.temperature, top.humidity)
+        if (thermal.isAlert && lastAlertReadingId.current !== top.id) {
+          lastAlertReadingId.current = top.id
+          playAlertSound(thermal.tone)
+          const alertType = thermal.type === 'wind_chill' ? '❄️ Wind Chill Alert' : '🔥 Heat Index Alert'
+          triggerDesktopNotification(
+            `${alertType}: ${thermal.label} (${thermal.value.toFixed(1)}°C)`,
+            thermal.description,
+          )
+        }
+      }
     }
     if (!dayRes.error) setSummary(summarize((dayRes.data as Reading[]).map(normalizeReading)))
     setLoading(false)
@@ -75,9 +132,28 @@ export default function DashboardPage() {
     }
   }, [load])
 
+  function toggleSound() {
+    const next = !soundOn
+    setSoundOn(next)
+    setSoundEnabled(next)
+    if (next) playAlertSound('info')
+  }
+
+  async function handleEnableNotifications() {
+    const perm = await requestNotificationPermission()
+    setNotifPermission(perm)
+    if (perm === 'granted') {
+      triggerDesktopNotification(
+        'Alert Notifications Active',
+        'You will receive notifications when readings cross safety thresholds.',
+      )
+    }
+  }
+
   const now = recent[0]
   const online = now ? nowMs - new Date(now.created_at).getTime() < ONLINE_WINDOW_MS : false
   const status = now ? rainStatus(now.rain_percent) : null
+  const thermal = now ? getThermalAlert(now.temperature, now.humidity) : null
   const dash = loading ? '—' : 'No data'
 
   return (
@@ -85,12 +161,44 @@ export default function DashboardPage() {
       <div className="page-header">
         <div>
           <h1>Dashboard</h1>
-          <p className="lede">Live readings from the sensor. Updates every 5 seconds.</p>
+          <p className="lede">Live readings from the sensor with real-time threshold alerts. Updates every 5 seconds.</p>
         </div>
         <div className="header-actions">
           <span className={`badge ${online ? 'ok' : 'bad'}`}>
             <span className={`dot ${online ? 'on' : ''}`} /> Device {online ? 'Online' : 'Offline'}
           </span>
+          <button
+            type="button"
+            className="btn-ghost btn-sm"
+            onClick={toggleSound}
+            title={soundOn ? 'Alert chime is enabled. Click to mute.' : 'Alert chime is muted. Click to enable.'}
+          >
+            {soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />}
+            {soundOn ? 'Sound On' : 'Muted'}
+          </button>
+          {isNotificationSupported() && (
+            <button
+              type="button"
+              className="btn-ghost btn-sm"
+              onClick={handleEnableNotifications}
+              title={
+                notifPermission === 'granted'
+                  ? 'Desktop alerts enabled'
+                  : 'Click to enable browser desktop notifications'
+              }
+            >
+              {notifPermission === 'granted' ? <Bell size={15} /> : <BellOff size={15} />}
+              {notifPermission === 'granted' ? 'Alerts On' : 'Enable Push'}
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn-ghost btn-sm"
+            onClick={() => setShowGuide(!showGuide)}
+            title="View threshold guides"
+          >
+            <HelpCircle size={15} /> Thresholds
+          </button>
           <button type="button" className="btn-ghost btn-sm" onClick={() => void load()}>
             <RefreshCw size={15} /> Refresh
           </button>
@@ -99,6 +207,38 @@ export default function DashboardPage() {
 
       {error && <div className="alert bad">{error}</div>}
 
+      {/* ══════ PROMINENT ALERT BANNER ══════ */}
+      {now && thermal && thermal.isAlert && (
+        <div className={`alert-banner ${thermal.tone}`}>
+          <div className="alert-banner-left">
+            <span className="alert-banner-icon">
+              {thermal.type === 'wind_chill' ? (
+                <Snowflake size={24} />
+              ) : (
+                <AlertTriangle size={24} />
+              )}
+            </span>
+            <div>
+              <div className="alert-banner-title">
+                {thermal.type === 'wind_chill' ? '❄️ Wind Chill Advisory' : '⚠️ Heat Index Alert'}:{' '}
+                <span className="alert-banner-level">{thermal.label}</span> ({thermal.value.toFixed(1)}°C)
+              </div>
+              <p className="alert-banner-desc">{thermal.description}</p>
+            </div>
+          </div>
+          <div className="alert-banner-actions">
+            <button type="button" className="alert-ctrl-btn" onClick={toggleSound}>
+              {soundOn ? <VolumeX size={14} /> : <Volume2 size={14} />}
+              {soundOn ? 'Mute' : 'Unmute'}
+            </button>
+            <button type="button" className="alert-ctrl-btn" onClick={() => setShowGuide(true)}>
+              View Scale
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ══════ STATS GRID ══════ */}
       <div className="stat-grid">
         <div className="stat">
           <div className="stat-top">
@@ -144,6 +284,33 @@ export default function DashboardPage() {
 
         <div className="stat">
           <div className="stat-top">
+            <span className="label">
+              {thermal?.type === 'wind_chill' ? 'Wind Chill Temp' : 'Heat Index'}
+            </span>
+            {thermal?.type === 'wind_chill' ? (
+              <Snowflake size={20} className="stat-icon" />
+            ) : (
+              <Flame size={20} className="stat-icon" />
+            )}
+          </div>
+          <div className="value">{thermal ? `${thermal.value.toFixed(1)}°C` : dash}</div>
+          {thermal && (
+            <>
+              <div className="meter">
+                <div
+                  className={`meter-fill ${thermal.tone}`}
+                  style={{
+                    width: `${Math.min(100, Math.max(10, ((thermal.value - 20) / 35) * 100))}%`,
+                  }}
+                />
+              </div>
+              <span className={`badge ${thermal.tone}`}>{thermal.label}</span>
+            </>
+          )}
+        </div>
+
+        <div className="stat">
+          <div className="stat-top">
             <span className="label">Last Update</span>
             <Clock size={20} className="stat-icon" />
           </div>
@@ -151,6 +318,94 @@ export default function DashboardPage() {
           {now && <span className="stat-sub">{timeAgo(now.created_at, nowMs)}</span>}
         </div>
       </div>
+
+      {/* ══════ THRESHOLD REFERENCE CARD ══════ */}
+      {showGuide && (
+        <div className="panel">
+          <div className="section-head" style={{ marginBottom: '1rem' }}>
+            <h3 className="panel-title" style={{ margin: 0 }}>
+              Threshold & Notification Reference Guidelines
+            </h3>
+            <button
+              type="button"
+              className="btn-ghost btn-sm"
+              onClick={() => setShowGuide(false)}
+            >
+              Hide
+            </button>
+          </div>
+          <div className="guide-tabs">
+            <button
+              type="button"
+              className={`guide-tab ${guideTab === 'heat' ? 'active' : ''}`}
+              onClick={() => setGuideTab('heat')}
+            >
+              Heat Index Thresholds
+            </button>
+            <button
+              type="button"
+              className={`guide-tab ${guideTab === 'wind' ? 'active' : ''}`}
+              onClick={() => setGuideTab('wind')}
+            >
+              Wind Chill Thresholds
+            </button>
+          </div>
+
+          <div className="table-wrap">
+            {guideTab === 'heat' ? (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Threshold Range</th>
+                    <th>Classification</th>
+                    <th>Alert Status</th>
+                    <th>Health Impact & Safety Guideline</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {HEAT_INDEX_THRESHOLDS.map((t) => (
+                    <tr key={t.range}>
+                      <td>
+                        <strong>{t.range}</strong>
+                      </td>
+                      <td>
+                        <span className={`badge ${t.tone}`}>{t.label}</span>
+                      </td>
+                      <td>{t.tone === 'ok' ? 'Normal' : '⚠️ Alert Active'}</td>
+                      <td className="muted">{t.notes}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Threshold Range</th>
+                    <th>Classification</th>
+                    <th>Alert Status</th>
+                    <th>Health Impact & Safety Guideline</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {WIND_CHILL_THRESHOLDS.map((t) => (
+                    <tr key={t.range}>
+                      <td>
+                        <strong>{t.range}</strong>
+                      </td>
+                      <td>
+                        <span className={`badge ${t.tone}`}>{t.label}</span>
+                      </td>
+                      <td>⚠️ Cold Advisory</td>
+                      <td className="muted">{t.notes}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
 
       <TrendChart rows={recent} />
 

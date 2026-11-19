@@ -51,7 +51,14 @@ export default function PublicLayout() {
       </main>
 
       <footer className="public-footer">
-        © {new Date().getFullYear()} {APP_NAME} — {APP_TAGLINE}
+        <div className="footer-logos">
+          <img src="/school-logo.png" alt="School Logo" className="footer-logo" title="School" />
+          <img src={LOGO_SRC} alt={APP_NAME} className="footer-logo" title={APP_NAME} />
+          <img src="/strand-logo.png" alt="Strand Logo" className="footer-logo" title="Strand" />
+        </div>
+        <p style={{ margin: 0 }}>
+          © {new Date().getFullYear()} {APP_NAME} — {APP_TAGLINE}
+        </p>
       </footer>
     </div>
   )

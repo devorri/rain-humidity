@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { CloudRain, Droplets, Thermometer, Wifi, Database, LayoutDashboard } from 'lucide-react'
+import { CloudRain, Droplets, Thermometer, Wifi, Database, LayoutDashboard, Flame } from 'lucide-react'
 import { APP_NAME, APP_TAGLINE, LOGO_SRC } from '../lib/types'
 
 const features = [
@@ -18,6 +18,11 @@ const features = [
     title: 'Humidity',
     text: 'The same DHT11 sensor tracks relative humidity so you know how moist the air is.',
   },
+  {
+    icon: <Flame size={22} />,
+    title: 'Thermal Alerts',
+    text: 'Calculates Heat Index and monitors Wind Chill thresholds with instant audio and visual warnings.',
+  },
 ]
 
 const steps = [
@@ -30,7 +35,11 @@ export default function HomePage() {
   return (
     <>
       <section className="hero">
-        <img src={LOGO_SRC} alt={APP_NAME} className="hero-logo" />
+        <div className="hero-logos-cluster">
+          <img src="/school-logo.png" alt="School Logo" className="hero-partner-logo" title="School Logo" />
+          <img src={LOGO_SRC} alt={APP_NAME} className="hero-logo" />
+          <img src="/strand-logo.png" alt="Strand Logo" className="hero-partner-logo" title="Strand Logo" />
+        </div>
         <span className="eyebrow">{APP_NAME} Project</span>
         <h1>{APP_TAGLINE}</h1>
         <p className="lede">
